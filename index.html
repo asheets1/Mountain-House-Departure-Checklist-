@@ -62,6 +62,10 @@
       border-width: 0 2.5px 2.5px 0;
       transform: rotate(45deg);
     }
+    .na-toggle {
+      appearance: none;
+      -webkit-appearance: none;
+    }
     /* Toast animation */
     #notification-toast {
       transition: transform 0.3s ease, opacity 0.3s ease;
@@ -82,7 +86,7 @@
         <span class="text-xs uppercase tracking-widest text-emerald-200/80 font-bold">Departure Checklist</span>
       </div>
       <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Checklist for Leaving Mountain House</h1>
-      <p class="text-forest-100 text-sm mt-1">Complete each item below before departure to secure the cabin.</p>
+      <p class="text-forest-100 text-sm mt-1">Check each item before you leave, or mark N/A if it does not apply this visit.</p>
     </div>
   </header>
 
@@ -93,7 +97,8 @@
       <div class="flex items-center justify-between mb-2">
         <div>
           <span class="text-xs font-bold text-stone-500 uppercase tracking-wider">Progress</span>
-          <div class="text-lg font-bold text-stone-800" id="progress-text">0 of 22 Completed</div>
+          <div class="text-lg font-bold text-stone-800 leading-tight" id="progress-text">0 of 22 handled</div>
+          <div class="text-xs text-stone-500 mt-0.5" id="progress-detail">0 done · 0 N/A · 22 left</div>
         </div>
         <span id="progress-badge" class="px-2.5 py-1 text-xs font-semibold rounded-full bg-stone-100 text-stone-600">0%</span>
       </div>
@@ -138,7 +143,7 @@
           </svg>
           Checklist Items
         </h2>
-        <span class="text-xs text-stone-400">Tap item or box to toggle</span>
+        <span class="text-xs text-stone-400">Check the box, or mark N/A</span>
       </div>
       
       <div id="checklist-container" class="divide-y divide-stone-100">
@@ -229,7 +234,7 @@
       // Load saved state or empty object
       try {
         const savedStates = localStorage.getItem(STORAGE_KEY_ITEMS);
-        taskStates = savedStates ? JSON.parse(savedStates) : {};
+        taskStates = normalizeTaskStates(savedStates ? JSON.parse(savedStates) : {});
       } catch (e) {
         taskStates = {};
       }
@@ -260,55 +265,93 @@
       updateProgress();
     }
 
+    function normalizeTaskStates(raw) {
+      const next = {};
+      if (!raw || typeof raw !== "object") return next;
+      Object.entries(raw).forEach(([key, value]) => {
+        if (value === true || value === "done") next[key] = "done";
+        else if (value === "na") next[key] = "na";
+      });
+      return next;
+    }
+
+    function itemState(index) {
+      const value = taskStates[index];
+      if (value === true || value === "done") return "done";
+      if (value === "na") return "na";
+      return "open";
+    }
+
     function renderList() {
       const container = document.getElementById("checklist-container");
       container.innerHTML = "";
 
       CHECKLIST_ITEMS.forEach((task, index) => {
-        const isChecked = !!taskStates[index];
+        const state = itemState(index);
+        const isChecked = state === "done";
+        const isNa = state === "na";
         const wrapper = document.createElement("div");
-        wrapper.className = `task-item flex items-start gap-3.5 p-4 select-none cursor-pointer hover:bg-stone-50 active:bg-stone-100 transition ${
-          isChecked ? "bg-forest-50/50" : ""
+        wrapper.className = `task-item flex items-start gap-3 p-4 select-none transition ${
+          isChecked ? "bg-forest-50/50" : isNa ? "bg-amber-50/60" : "hover:bg-stone-50"
         }`;
-        wrapper.onclick = (e) => {
-          // Prevent double trigger when tapping directly on input
-          if (e.target.tagName !== "INPUT") {
-            toggleTask(index);
-          }
-        };
 
         wrapper.innerHTML = `
-          <div class="flex items-center h-6">
+          <div class="flex items-center h-6 mt-1.5">
             <input 
               type="checkbox" 
               id="task-${index}" 
               ${isChecked ? "checked" : ""} 
               onchange="toggleTask(${index})"
+              aria-label="Mark done: ${escapeHtml(task)}"
               class="custom-checkbox w-5 h-5 rounded-md border-2 border-stone-300 text-forest-600 focus:ring-forest-600 focus:ring-offset-0 transition"
             >
           </div>
-          <label for="task-${index}" class="text-sm flex-1 cursor-pointer font-medium ${
-            isChecked ? "text-stone-400 line-through" : "text-stone-800"
+          <label for="task-${index}" class="text-sm flex-1 cursor-pointer font-medium pt-1.5 ${
+            isChecked ? "text-stone-400 line-through" : isNa ? "text-stone-400" : "text-stone-800"
           }">
             <span class="text-stone-400 mr-1.5 font-normal text-xs">${index + 1}.</span>
             ${escapeHtml(task)}
           </label>
+          <button
+            type="button"
+            onclick="toggleNa(${index})"
+            aria-pressed="${isNa ? "true" : "false"}"
+            aria-label="Mark not applicable: ${escapeHtml(task)}"
+            class="na-toggle shrink-0 mt-0.5 min-h-11 min-w-11 px-2.5 rounded-xl border text-[11px] font-bold tracking-wide transition active:scale-95 ${
+              isNa
+                ? "bg-amberwood-100 text-amberwood-700 border-amberwood-600"
+                : "bg-white text-stone-400 border-stone-200 hover:text-amberwood-700 hover:border-amberwood-600"
+            }"
+          >N/A</button>
         `;
         container.appendChild(wrapper);
       });
     }
 
     function toggleTask(index) {
-      taskStates[index] = !taskStates[index];
+      if (itemState(index) === "done") delete taskStates[index];
+      else taskStates[index] = "done";
+      saveState();
+      renderList();
+      updateProgress();
+    }
+
+    function toggleNa(index) {
+      if (itemState(index) === "na") delete taskStates[index];
+      else taskStates[index] = "na";
       saveState();
       renderList();
       updateProgress();
     }
 
     function checkAll(value) {
-      CHECKLIST_ITEMS.forEach((_, index) => {
-        taskStates[index] = value;
-      });
+      if (value) {
+        CHECKLIST_ITEMS.forEach((_, index) => {
+          taskStates[index] = "done";
+        });
+      } else {
+        taskStates = {};
+      }
       saveState();
       renderList();
       updateProgress();
@@ -338,18 +381,29 @@
 
     function updateProgress() {
       const total = CHECKLIST_ITEMS.length;
-      let completed = 0;
+      let done = 0;
+      let na = 0;
       CHECKLIST_ITEMS.forEach((_, index) => {
-        if (taskStates[index]) completed++;
+        const state = itemState(index);
+        if (state === "done") done++;
+        else if (state === "na") na++;
       });
 
-      const percentage = Math.round((completed / total) * 100);
+      const handled = done + na;
+      const left = total - handled;
+      const percentage = Math.round((handled / total) * 100);
       const progressBar = document.getElementById("progress-bar-fill");
       const progressText = document.getElementById("progress-text");
+      const progressDetail = document.getElementById("progress-detail");
       const progressBadge = document.getElementById("progress-badge");
 
       if (progressBar) progressBar.style.width = `${percentage}%`;
-      if (progressText) progressText.innerText = `${completed} of ${total} Completed`;
+      if (progressText) progressText.innerText = `${handled} of ${total} handled`;
+      if (progressDetail) {
+        progressDetail.innerText = left === 0
+          ? `${done} done · ${na} N/A · ready to depart`
+          : `${done} done · ${na} N/A · ${left} left`;
+      }
       if (progressBadge) {
         progressBadge.innerText = `${percentage}%`;
         if (percentage === 100) {
@@ -374,27 +428,36 @@
       });
 
       let completedItems = [];
+      let naItems = [];
       let pendingItems = [];
 
       CHECKLIST_ITEMS.forEach((item, index) => {
-        if (taskStates[index]) {
-          completedItems.push(`[✓] ${item}`);
-        } else {
-          pendingItems.push(`[ ] ${item}`);
-        }
+        const state = itemState(index);
+        if (state === "done") completedItems.push(`[✓] ${item}`);
+        else if (state === "na") naItems.push(`[N/A] ${item}`);
+        else pendingItems.push(`[ ] ${item}`);
       });
 
       const total = CHECKLIST_ITEMS.length;
       const doneCount = completedItems.length;
+      const naCount = naItems.length;
+      const handled = doneCount + naCount;
 
       let summaryText = `MOUNTAIN HOUSE DEPARTURE CHECKLIST\n`;
       summaryText += `Date/Time: ${formattedDate}\n`;
       summaryText += `Completed By: ${name}\n`;
-      summaryText += `Status: ${doneCount}/${total} Tasks Completed (${Math.round((doneCount / total) * 100)}%)\n\n`;
+      summaryText += `Status: ${doneCount} done, ${naCount} N/A, ${pendingItems.length} incomplete (${Math.round((handled / total) * 100)}% handled)\n\n`;
 
       summaryText += `--- COMPLETED TASKS (${doneCount}) ---\n`;
       if (completedItems.length > 0) {
         summaryText += completedItems.join("\n") + "\n\n";
+      } else {
+        summaryText += "(None)\n\n";
+      }
+
+      summaryText += `--- NOT APPLICABLE (${naCount}) ---\n`;
+      if (naItems.length > 0) {
+        summaryText += naItems.join("\n") + "\n\n";
       } else {
         summaryText += "(None)\n\n";
       }
